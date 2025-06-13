@@ -632,8 +632,6 @@ def save_checkpoint(desired_checkpoint_path, model, optimizer):
         f"{desired_checkpoint_path}")
     print(f"Checkpoint: '{desired_checkpoint_path}' saved")
 
-
-    
 #Utility to download json formatted data with a given url => returns file's data
 def download_and_load_file(file_path, url):
     ssl_context = ssl.create_default_context()
@@ -744,8 +742,8 @@ customized_collate_fn = partial(custom_collate_fn, device=device, allowed_max_le
 def generate_alpaca_dataloaders():
     import alpaca_full
     # data = alpaca_full.alpaca_data[:1000]
-    data = alpaca_full.alpaca_data[1001:2000]
-    # data = alpaca_full.alpaca_data[2001:3000]
+    # data = alpaca_full.alpaca_data[1001:2000]
+    data = alpaca_full.alpaca_data[2001:3000]
     # data = alpaca_full.alpaca_data[3001:4000]
     # data = alpaca_full.alpaca_data[4001:5000]
     # data = alpaca_full.alpaca_data[5001:6000]
@@ -845,17 +843,42 @@ def query_alpaca(instruction, input, new_tokens, context_size, temperature, top_
         .replace("### Response:", "")
         .strip()
     )
+    response_text = response_text.split("<|endoftext|>", 1)[0] #Trims everything after the first <|endoftext|>
     print(response_text)
+
+def prompt_alpaca():
+    formatted_model_name = checkpoint_load.replace(".pth", "")
+    print(f"-----------------PROMPT FOR: {formatted_model_name}----------------------\n"
+        "      Prompts for this gpt model are handled in the Alpaca format.        \n"
+        "--------------------------------------------------------------------------\n"
+        "Enter an instruction (examples):                                          \n"
+        "'Generate a headline for the following article.' or 'What is an API?'     \n"
+        "Enter an optional input (example):                                        \n"
+        "'This article discusses the future of renewable energy sources in the US.'\n"
+        "--------------------------------------------------------------------------\n")
+    user_instruction = input("Please enter an instruction/prompt: ")
+    user_input = input("Please enter an input (optional): ")
+    query_alpaca(user_instruction, user_input, 100, 1024, 1.4, 10)
+    print("--------------------------Query again? Y or N-----------------------------\n")
+    repeat_question_answer = input("'Y' for 'Yes', 'N' for 'No'")
+
+    true_responses = ["y", "Y", "yes", "YES", "Yes"]
+    if repeat_question_answer in true_responses:
+        return True
+    else:
+        return False
+        
+
 #-----------Run------------
 model, optimizer = load_checkpoint(checkpoint_load)
 
-#RUN ALPACA TRAINING
+# RUN ALPACA TRAINING
 # train_on_alpaca()
 
 #RUN QUERY ON ALPACA FINETUNED MODEL
-test_instruction = "What is a API?"
-test_input = ""
-query_alpaca(test_instruction, test_input, 100, 1024, 1.4, 10)
+loop_active = True
+while loop_active == True:
+    loop_active = prompt_alpaca()
 
 #----------Save------------
 # save_checkpoint(checkpoint_save, model, optimizer)
