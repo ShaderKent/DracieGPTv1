@@ -1,89 +1,83 @@
+import os
 import time
+import urllib
+import json
+import ssl
 import torch
 import torch.nn as nn
-import tiktoken
-import os
-import urllib.request
 from torch.utils.data import Dataset, DataLoader
+import tiktoken
+from functools import partial
+import numpy as np
 
+from gpt_download3 import download_and_load_gpt2
 
-GPT_CONFIG_124M = {
-    "vocab_size": 50257,    #Vocabulary Size
-    "context_length": 1024, #Context length
-    "emb_dim": 768,         #Embedding dimensions
-    "n_heads": 12,          #Number of attention heads
-    "n_layers": 12,         #Number of layers
-    "drop_rate": 0.1,       #Dropout rate
-    "qkv_bias": False       #Query-Key-Value bias
+BASE_CONFIG = {
+    "vocab_size": 50257,     # Vocabulary size
+    "context_length": 1024,  # Context length
+    "drop_rate": 0.0,        # Dropout rate
+    "qkv_bias": True         # Query-key-value bias
 }
 
-#Instances device/prints currently used device => Apple compatibility options
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#Uncommenting the following lines will allow the code to run on Apple Silicon chips instead cpu
-#Note: Resulting loss values may be slightly different
+GPT_CONFIG_124M = {
+    "vocab_size": 50257,     #Vocabulary Size
+    "context_length": 1024,  #Context length
+    "emb_dim": 768,          #Embedding dimensions
+    "n_heads": 12,           #Number of attention heads
+    "n_layers": 12,          #Number of layers
+    "drop_rate": 0.1,        #Dropout rate
+    "qkv_bias": False        #Query-Key-Value bias
+}
 
-# if torch.cuda.is_available():
-#     device = torch.device("cuda")
-# elif torch.backends.mps.is_available():
-#     device = torch.device("mps")
-# else:
-#     device = torch.device("cpu")
+model_configs = {
+    "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
+    "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
+    "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
+    "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
+}
+
+CHOOSE_MODEL = "gpt2-medium (355M)"
+
+BASE_CONFIG.update(model_configs[CHOOSE_MODEL])
+model_size = CHOOSE_MODEL.split(" ")[-1].lstrip("(").rstrip(")")
+
+checkpoint_load = "GPT-2_355M_Instructions.pth"
+checkpoint_save = "GPT-2_355M_Instructions.pth"
+requested_device = "cpu"
+torch.manual_seed(123)
+
+def instanceDevice(requested_device):
+    #Instances device/prints currently used device => Apple compatibility options
+
+    if(requested_device == "cuda"):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device("cpu")
+
+    #print("Allocated Memory:", torch.cuda.memory_allocated(device)/ 1000000000)
+
+    #----------------------------------------------------------------------------
+    #Uncommenting the following lines will allow the code to run on Apple Silicon chips instead cpu
+    #Note: Resulting loss values may be slightly different
+
+    # if torch.cuda.is_available():
+    #     device = torch.device("cuda")
+    # elif torch.backends.mps.is_available():
+    #     device = torch.device("mps")
+    # else:
+    #     device = torch.device("cpu")
+    #----------------------------------------------------------------------------
     
-print(f"Using {device} device: {torch.version.cuda}")
+    print(f"Requested: {requested_device}, Using: {device}")
+    return device
 
-#Instance tokenizer
-tokenizer = tiktoken.get_encoding("gpt2")
+device = instanceDevice(requested_device)
+
 #Default start_context => Used in testing
 start_context = "Every effort moves you"
 
-#------------------------Loads Short-story for testing-----------------------------
-# file_path = "the-verdict.txt"
-# url = "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch/main/ch02/01_main-chapter-code/the-verdict.txt"
-
-# if not os.path.exists(file_path):
-#     with urllib.request.urlopen(url) as response:
-#         text_data = response.read().decode("utf-8")
-#     with open(file_path, "w", encoding="utf-8") as file:
-#         file.write(text_data)
-
-# else:
-#     with open(file_path, "r", encoding="utf-8") as file:
-#         text_data = file.read()
-
-# total_characters = len(text_data)
-# total_tokens = len(tokenizer.encode(text_data))
-
-# print(f"Characters: {len(text_data)}, Tokens: {len(tokenizer.encode(text_data))}")
-# #---------------------------------------------------------------------
-
-# OPTION FOR RUNNING PRETRAINING
-# #Untrained files
-# untrained = [
-#     # 'Pile-1-2501.txt', 
-#     'Pile-2501-5001.txt', 
-#     'Pile-5001-7501.txt', 
-#     # 'Pile-7501-10001.txt', 
-#     # "Pile-10001-12501.txt",
-#     # 'Pile-12501-15001.txt', 
-#     # 'Pile-15001-17501.txt', 
-#     # 'Pile-17501-20001.txt', 
-#     # 'Pile-20001-25001.txt', 
-#     ]
-# #Loads files for training
-# raw_text = ""
-# for i in range(0, len(untrained)):
-#     currentTrain = untrained.pop()
-#     with open(currentTrain,  encoding='utf-8') as f:
-#         for line in f.readlines(): #Current file is a list, spreads it into a long string
-#             raw_text = raw_text + line
-#     # with open('Pile-2501-5001.txt',  encoding='utf-8') as f:
-#     #     raw_text = ""
-#     #     for line in f.readlines(): #Current file is a list, spreads it into a long string
-#     #         raw_text = raw_text + line
-
-# #Confirms file is loaded by printing text
-# # print(len(raw_text.split()))
-# print(raw_text[:150])
+#Instance tokenizer
+tokenizer = tiktoken.get_encoding("gpt2")
 
 #Takes raw text, encodes it, and a batch dimension
 def text_to_token_ids(text, tokenizer):
@@ -96,6 +90,7 @@ def token_ids_to_text(token_ids, tokenizer):
     flat = token_ids.squeeze(0) #Remove batch dimension
     return tokenizer.decode(flat.tolist())
 
+#Basic dataset class used in create_dataloader_v1 => used in pretraining
 class GPTDatasetV1(Dataset):
     def __init__(self, txt, tokenizer, max_length, stride):
         self.input_ids = []
@@ -135,61 +130,7 @@ def create_dataloader_v1(txt, batch_size=4, max_length=256, stride=128, shuffle=
     )
 
     return dataloader
-
-# #TRAINING VARIABLES:
-# #Train/Validation Ratio
-# train_ratio = 0.90
-# #Splits the text_data relative to training ratio => example: train_Data = 90%, val_data = 10%
-# split_idx = int(train_ratio * len(raw_text))
-# train_data = raw_text[:split_idx] 
-# val_data = raw_text[split_idx:]
-
-# train_loader = create_dataloader_v1(
-#     train_data,
-#     # raw_text,
-#     batch_size = 2, #Set very low, 2, due to demands processing large batches. GPT-2 = 1024
-#     max_length = GPT_CONFIG_124M["context_length"],
-#     stride = GPT_CONFIG_124M["context_length"],
-#     drop_last = True,
-#     shuffle = True,
-#     num_workers = 0
-# )
-
-# val_loader = create_dataloader_v1(
-#     val_data,
-#     # raw_text,
-#     batch_size = 2,  #Set very low, 2, due to demands processing large batches. GPT-2 = 1024
-#     max_length = GPT_CONFIG_124M["context_length"],
-#     stride = GPT_CONFIG_124M["context_length"],
-#     drop_last = False,
-#     shuffle = False,
-#     num_workers = 0
-# )  
-
-#Handles importing text data from Pile Dataset
-#----------------------------------------------------
-# num_samples_to_take = 5
-# from datasets import load_dataset
-# dataset = load_dataset("monology/pile-uncopyrighted", split="train", streaming=True, trust_remote_code=True)
-# # dataset = dataset.take(num_samples_to_take)
-# print(dataset)
-# indexPileCC = 1
-# tempString = ""
-# for item in dataset: 
-#     if (item["meta"]['pile_set_name'] == "Pile-CC"):
-#         indexPileCC = indexPileCC + 1
-#         tempString = tempString + item["text"]
-#         print("Current Index (only Pile-CC): ", indexPileCC)
-
-
-#     if(indexPileCC % 2500 == 1):
-#         with open(f"Pile-{indexPileCC-2500}-{indexPileCC}.txt", "w", encoding="utf-8") as f:
-#             f.write(tempString)
-#         tempString = ""
-#         indexPileCC = indexPileCC + 1
-#---------------------------------------------------- 
-
-    
+   
 #Method to normalize layers, used 2x in transformer 1x on final output
 #Normalization = values are adjusted to have a mean of 0 and a variance of 1
 #    Prevents numbers from getting too big or two small, which would cause issues for learning
@@ -366,6 +307,7 @@ class TransformerBlock(nn.Module):
 
         return x
 
+#GPT Model (Core)
 class GPTModel(nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -407,22 +349,12 @@ class GPTModel(nn.Module):
         logits = self.out_head(x)
         return logits #Size = [batch_size, num_tokens, vocab_size = 50257]
 
-#------------------------------------------------------------------------------
-# # Instance model/optimizer => Used when generating a mew state (fresh)
-# model = GPTModel(GPT_CONFIG_124M)
-# optimizer = torch.optim.AdamW(model.parameters(), lr=0.0004, weight_decay=0.1)
-# model.to(device)
-#------------------------------------------------------------------------------
-#------------------------------------------------------------------------------
-# #Loads previously trained state
-# checkpoint = torch.load("model_and_optimizer.pth")
-# model = GPTModel(GPT_CONFIG_124M)
-# model.to(device) 
-# model.load_state_dict(checkpoint["model_state_dict"])
-# optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=0.1)
-# optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-# model.train(); #Model in train mode
-#------------------------------------------------------------------------------
+# Instance model/optimizer => Used when generating a mew state (fresh)
+def fresh_untrained_model():
+    model = GPTModel(GPT_CONFIG_124M)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0004, weight_decay=0.1)
+    model.to(device)
+    return model, optimizer
 
 #Text/token generation method
 def generate(model, idx, max_new_tokens, context_size, temperature=0.0, top_k=None, eos_id=None):
@@ -516,6 +448,8 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
         model.train() #Set model to training mode
 
         for input_batch, target_batch in train_loader:
+            torch.cuda.empty_cache()
+
             optimizer.zero_grad() # Reset loss gradients from previous batch iteration
 
             #Caclulates loss
@@ -529,6 +463,9 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
             tokens_seen += input_batch.numel() #Returns the total num of tokens seen
             global_step += 1
 
+            #Optional GPU Memory Allocated Printout
+            # print("Allocated Memory:", torch.cuda.memory_allocated(device)/ 1000000000)
+
             #Optional evaluation step => Runs every eval_frequence # of batches 
             #     Prints training and validation loss to terminal
             if global_step % eval_freq == 0:
@@ -541,7 +478,7 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
                 average1kVal = average1kVal + val_loss
                 print(f"Ep {epoch+1} (Step {global_step:06d}): "
                       f"Train loss {train_loss:.3f}, Val loss {val_loss:.3f}")
-            if global_step % (eval_freq*10) == 0:
+            if global_step % (eval_freq*3) == 0:
                 generate_and_print_sample(
                     model, tokenizer, device, start_context
                 )
@@ -550,16 +487,16 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
         
     return train_losses, val_losses, track_tokens_seen
 
+#Calculates loss for the training and validation dataloaders (full)
 def evaluate_model(model, train_loader, val_loader, device, eval_iter):
     model.eval()
-    #Calculates loss for the training and validation dataloaders
     with torch.no_grad():
         train_loss = calc_loss_loader(train_loader, model, device, num_batches=eval_iter)
         val_loss = calc_loss_loader(train_loader, model, device, num_batches=eval_iter)
     model.train()
     return train_loss, val_loss
 
-#Calculates 50 token sample to show how well the model is performing. Called every epoch.
+#Calculates 50 token sample to show how well the model is performing.
 def generate_and_print_sample(model, tokenizer, device, start_context):
     model.eval()
     #Context_size is set to current #tokens in pos_emb
@@ -578,39 +515,6 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
     print(decoded_text.replace("\n", " ")) #Compact print format
     model.train()
 
-#-----------------------------Training Test------------------------------------------
-# #NOTE: Uncomment the following code to calculate execution time
-# start_time = time.time()
-
-# torch.cuda.empty_cache() #Added due to maxing out cache in GPU
-# torch.manual_seed(123) #Reproducibility
-
-# num_epochs = 1 # Go through entire dataset 10 times
-# train_losses, val_losses, tokens_seen = train_model_simple(
-#     model, train_loader, val_loader, optimizer, device,
-#     num_epochs=num_epochs, eval_freq=5, eval_iter=5,
-#     start_context="Every effort moves you", tokenizer=tokenizer
-# )
-
-# #NOTE: Uncomment the following code to calculate execution time
-# end_time = time.time()
-# execution_time_minutes = (end_time - start_time) / 60
-# print(f"Training completed in {execution_time_minutes:.2f} minutes.")                   
-
-# #---------------------------------------------------------------------------------------------
-# #Model parameter / optimizer data saving 
-# torch.save({
-#     "model_state_dict": model.state_dict(),
-#     "optimizer_state_dict": optimizer.state_dict(),
-#     },
-#     "model_and_optimizer.pth"
-# )
-# #---------------------------------------------------------------------------------------------
-
-#Need to grab the specific params from the downloaded params and load them into the model
-
-import numpy as np
-
 #Small utility function that checks whether two tensors or arrays are the same dim shape.
 #If true, return 'right', or assign the right value, if false throw error
 def assign(left, right):
@@ -618,6 +522,7 @@ def assign(left, right):
         raise ValueError(f"Shape mismatch. Left: {left.shape}, Right: {right.shape}")
     return torch.nn.Parameter(torch.tensor(right))
     
+#Divides pretrained gpt data and assigns it to correct parameters
 def load_weights_into_gpt(gpt, params):
     #Set token_emb and pos_emb = to the trained weights for those matrixies
     gpt.pos_emb.weight = assign(gpt.pos_emb.weight, params['wpe'])
@@ -689,51 +594,47 @@ def load_weights_into_gpt(gpt, params):
     #    for both the main tok_emb and final output dim
     gpt.out_head.weight = assign(gpt.out_head.weight, params["wte"])
 
-print("Pretrained Weights Loaded")
-from gpt_download3 import download_and_load_gpt2
+    print(f"{CHOOSE_MODEL} weights assigned")
 
-BASE_CONFIG = {
-    "vocab_size": 50257,     # Vocabulary size
-    "context_length": 1024,  # Context length
-    "drop_rate": 0.0,        # Dropout rate
-    "qkv_bias": True         # Query-key-value bias
-}
+#Downloads a 'fresh' instance of pretrained gpt2 parameters of "model_size" (small, medium, large, xl)
+def download_fresh_gpt_pretrained():
+    settings, params = download_and_load_gpt2(
+        model_size=model_size,
+        models_dir="gpt2"
+    )
+    model = GPTModel(BASE_CONFIG)
+    load_weights_into_gpt(model, params)
+    model.to(device)
+    model.eval()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.1)
+    return model, optimizer
 
-model_configs = {
-    "gpt2-small (124M)": {"emb_dim": 768, "n_layers": 12, "n_heads": 12},
-    "gpt2-medium (355M)": {"emb_dim": 1024, "n_layers": 24, "n_heads": 16},
-    "gpt2-large (774M)": {"emb_dim": 1280, "n_layers": 36, "n_heads": 20},
-    "gpt2-xl (1558M)": {"emb_dim": 1600, "n_layers": 48, "n_heads": 25},
-}
+#Loads previously trained state
+def load_checkpoint(desired_checkpoint_path):
+    checkpoint = torch.load(desired_checkpoint_path, weights_only=True)
 
-CHOOSE_MODEL = "gpt2-medium (355M)"
+    model = GPTModel(BASE_CONFIG)
+    model.to(device) 
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=0.1)
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    model.train(); #Model in train mode
+   
+    print(f"Checkpoint: '{desired_checkpoint_path}' loaded")
+    return model, optimizer
 
-BASE_CONFIG.update(model_configs[CHOOSE_MODEL])
-
-model_size = CHOOSE_MODEL.split(" ")[-1].lstrip("(").rstrip(")")
-settings, params = download_and_load_gpt2(
-    model_size=model_size,
-    models_dir="gpt2"
-)
-
-model = GPTModel(BASE_CONFIG)
-load_weights_into_gpt(model, params)
-model.to(device)
-model.eval()
+#Model parameter / optimizer data saving 
+def save_checkpoint(desired_checkpoint_path, model, optimizer):
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        },
+        f"{desired_checkpoint_path}")
+    print(f"Checkpoint: '{desired_checkpoint_path}' saved")
 
 
-from torch.utils.data import DataLoader
-
-num_workers = 0
-batch_size = 8
-
-torch.manual_seed(123)
-
-import json
-import os
-import urllib
-import ssl
-
+    
+#Utility to download json formatted data with a given url => returns file's data
 def download_and_load_file(file_path, url):
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
@@ -743,7 +644,7 @@ def download_and_load_file(file_path, url):
         with urllib.request.urlopen(url, context=ssl_context) as response:
             text_data = response.read().decode("utf-8")
         with open(file_path, "w", encoding="utf-8") as file:
-            file.write(text_data)
+            file.write("[" + text_data + "]")
     else:
         with open(file_path, "r", encoding="utf-8") as file:
             text_data = file.read()
@@ -753,39 +654,19 @@ def download_and_load_file(file_path, url):
 
     return data
 
-file_path = "instruction-data.json"
-url = (
-    "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
-    "/main/ch07/01_main-chapter-code/instruction-data.json"
-)
-
-data = download_and_load_file(file_path, url)
-print("Dataset Downloaded/Confirmed")
-
-
 #Converting Instructions into Alpaca format
-def format_input(entry):
+def format_input_alpaca(instruction, input):
     instruction_text = (
         f"Below is an instruction that describes a task. "
         f"Write a response that appropriately completes the request."
-        f"\n\n### Instruction:\n{entry['instruction']}"
+        f"\n\n### Instruction:\n{instruction}"
     )
 
-    input_text = f"\n\n### Input:\n{entry['input']}" if entry['input'] else ""
+    input_text = f"\n\n### Input:\n{input}" if input else ""
 
     return instruction_text + input_text
 
-
-#Split Dataset into Train-Test-Validation
-train_portion = int(len(data)*0.85) #85% for training
-test_portion = int(len(data) * 0.1) #10% for training
-val_portion = len(data) - train_portion - test_portion #Remaining 5% for validation
-
-train_data = data[:train_portion]
-test_data =  data[train_portion:train_portion + test_portion]
-val_data = data[train_portion + test_portion:]
-
-#Gets full inputText and tokenizes it
+#Dataset formatted for alpaca instructions based data
 class InstructionDataset(Dataset):
     def __init__(self, data, tokenizer):
         self.data = data
@@ -793,8 +674,12 @@ class InstructionDataset(Dataset):
         #Pre-tokenize text
         self.encoded_texts = []
         for entry in data:
-            instruction_plus_input = format_input(entry)
-            response_text = f"\n\n### Response: \n{entry['output']}"
+            instruction = entry["instruction"]
+            input = entry["input"]
+            output = entry["output"]
+
+            instruction_plus_input = format_input_alpaca(instruction, input)
+            response_text = f"\n\n### Response: \n{output}"
             full_text = instruction_plus_input + response_text
             self.encoded_texts.append(
                 tokenizer.encode(full_text)
@@ -805,7 +690,8 @@ class InstructionDataset(Dataset):
 
     def __len__(self):
         return len(self.data)
-    
+
+#Creates input target pairs, using padding to standardize length to largest input in batch
 def custom_collate_fn(
     batch, 
     pad_token_id=50256,
@@ -813,7 +699,7 @@ def custom_collate_fn(
     allowed_max_length=None,
     device="cpu"
 ):
-    #Find the logest sequence in the batch and increase the max length by +1 which will add 1 more padTok
+    #Find the longest sequence in the batch and increase the max length by +1 which will add 1 more padTok
     batch_max_length = max(len(item)+1 for item in batch)
 
     #Pad and prepare inputs
@@ -851,66 +737,125 @@ def custom_collate_fn(
     
     return inputs_tensor, targets_tensor   
 
-from functools import partial #Partial allows for a redefinition of a method that has predefined inputs
-#Creates makes it so when you call customized_collate_fn you are actually calling custom_collate_fn with
-#    device = device and allowed_max_length = 1024
+#Customized collate_fn call
 customized_collate_fn = partial(custom_collate_fn, device=device, allowed_max_length=1024)
 
-
-#Create train dataset => using InstructionDataset class and passing it into Dataloader
-train_dataset = InstructionDataset(train_data, tokenizer)
-train_loader = DataLoader(
-    train_dataset,
-    batch_size = batch_size,
-    collate_fn = customized_collate_fn,
-    shuffle = True,
-    drop_last = True,
-    num_workers = num_workers
-)
-print("Training Dataset Created")
-
-#Create validation dataset => using InstructionDataset class and passing it into Dataloader
-val_dataset = InstructionDataset(val_data, tokenizer)
-val_loader = DataLoader(
-    val_dataset,
-    batch_size = batch_size,
-    collate_fn = customized_collate_fn,
-    shuffle = False,
-    drop_last = False,
-    num_workers = num_workers
-)
-print("Validation Dataset Created")
+#Generates dataloaders using Alpaca instruction data for finetuning an instruction based model
+def generate_alpaca_dataloaders():
+    import alpaca_full
+    # data = alpaca_full.alpaca_data[:1000]
+    data = alpaca_full.alpaca_data[1001:2000]
+    # data = alpaca_full.alpaca_data[2001:3000]
+    # data = alpaca_full.alpaca_data[3001:4000]
+    # data = alpaca_full.alpaca_data[4001:5000]
+    # data = alpaca_full.alpaca_data[5001:6000]
+    # data = alpaca_full.alpaca_data[6001:7000]
+    # data = alpaca_full.alpaca_data[7001:8000]
+    # data = alpaca_full.alpaca_data[8001:9000]
+    # data = alpaca_full.alpaca_data[9001:10000]
+    # data = alpaca_full.alpaca_data[10001:11000]
+    # data = alpaca_full.alpaca_data[11001:12000]
+    # data = alpaca_full.alpaca_data[12001:13000]
+    # data = alpaca_full.alpaca_data[13001:14000]
+    # data = alpaca_full.alpaca_data[14001:15000]
 
 
+    #Split Dataset into Train-Test-Validation
+    train_portion = int(len(data) * 0.85) #85% for training
+    test_portion = int(len(data) * 0.1) #10% for training
+    val_portion = int(len(data)) - train_portion - test_portion #Remaining 5% for validation
 
-#Create test dataset => using InstructionDataset class and passing it into Dataloader
-test_dataset = InstructionDataset(test_data, tokenizer)
-test_loader = DataLoader(
-    test_dataset,
-    batch_size = batch_size,
-    collate_fn = customized_collate_fn,
-    shuffle = False,
-    drop_last = False,
-    num_workers = num_workers
-)
-print("Test Dataset Created")
+    train_data = data[:train_portion]
+    test_data =  data[train_portion:train_portion + test_portion]
+    val_data = data[train_portion + test_portion:]
 
+    print("Train: ", len(train_data), "Test: ", len(test_data), "Val", len(val_data))
+    num_workers = 0
+    batch_size = 1
 
+    #Create train dataset => using InstructionDataset class and passing it into Dataloader
+    train_dataset = InstructionDataset(train_data, tokenizer)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size = batch_size,
+        collate_fn = customized_collate_fn,
+        shuffle = True,
+        drop_last = True,
+        num_workers = num_workers
+    )
+    print("Training Dataset Created")
 
-start_time = time.time()
+    #Create validation dataset => using InstructionDataset class and passing it into Dataloader
+    val_dataset = InstructionDataset(val_data, tokenizer)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size = batch_size,
+        collate_fn = customized_collate_fn,
+        shuffle = False,
+        drop_last = False,
+        num_workers = num_workers
+    )
+    print("Validation Dataset Created")
 
-torch.manual_seed(123)
+    #Create test dataset => using InstructionDataset class and passing it into Dataloader
+    test_dataset = InstructionDataset(test_data, tokenizer)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size = batch_size,
+        collate_fn = customized_collate_fn,
+        shuffle = False,
+        drop_last = False,
+        num_workers = num_workers
+    )
+    print("Test Dataset Created")
+    return(train_loader, val_loader, test_loader, val_data)
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.00005, weight_decay=0.1)
+#Trains using Alpaca formatted dataloaders, used to finetune a pretrained model with instructions.
+def train_on_alpaca ():
 
-num_epochs = 1
+    train_loader, val_loader, test_loader, val_data = generate_alpaca_dataloaders()
+    start_time = time.time()
 
-train_losses, val_losses, tokens_seen = train_model_simple(
-    model, train_loader, val_loader, optimizer, device,
-    num_epochs=num_epochs, eval_freq=5, eval_iter=5,
-    start_context=format_input(val_data[0]), tokenizer=tokenizer
-)
+    num_epochs = 1
+    start_context_instruction = val_data[3]["instruction"]
+    start_context_input = val_data[3]["input"]
 
-end_time = time.time()
-execution_time_minutes = (end_time - start_time) / 60
-print(f"Training completed in {execution_time_minutes:.2f} minutes.")
+    if device == "cuda": 
+        torch.cuda.empty_cache() #Added due to maxing out cache in GPU
+        print("Allocated Memory:", torch.cuda.memory_allocated(device)/ 1000000000)
+
+    train_losses, val_losses, tokens_seen = train_model_simple(
+        model, train_loader, val_loader, optimizer, device,
+        num_epochs=num_epochs, eval_freq=5, eval_iter=5,
+        start_context=format_input_alpaca(start_context_instruction, start_context_input), tokenizer=tokenizer
+    )
+
+    end_time = time.time()
+    execution_time_minutes = (end_time - start_time) / 60
+    print(f"Training completed in {execution_time_minutes:.2f} minutes.")
+
+#Basic query using Alpaca instruction format (use with finetuned Alpaca model)
+def query_alpaca(instruction, input, new_tokens, context_size, temperature, top_k):
+    formatted_text = format_input_alpaca(instruction, input)
+    query = text_to_token_ids(formatted_text, tokenizer)
+    token_ids = generate(model, query, new_tokens, context_size=context_size, temperature=temperature, top_k=top_k)
+    result = token_ids_to_text(token_ids, tokenizer)
+    response_text = (
+        result[len(formatted_text):]
+        .replace("### Response:", "")
+        .strip()
+    )
+    print(response_text)
+#-----------Run------------
+model, optimizer = load_checkpoint(checkpoint_load)
+
+#RUN ALPACA TRAINING
+# train_on_alpaca()
+
+#RUN QUERY ON ALPACA FINETUNED MODEL
+test_instruction = "What is a API?"
+test_input = ""
+query_alpaca(test_instruction, test_input, 100, 1024, 1.4, 10)
+
+#----------Save------------
+# save_checkpoint(checkpoint_save, model, optimizer)
