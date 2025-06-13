@@ -1,6 +1,8 @@
 import os
+import sys
 import time
 import urllib
+import threading
 import json
 import ssl
 import torch
@@ -9,6 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 import tiktoken
 from functools import partial
 import numpy as np
+
 
 from gpt_download3 import download_and_load_gpt2
 
@@ -832,11 +835,67 @@ def train_on_alpaca ():
     execution_time_minutes = (end_time - start_time) / 60
     print(f"Training completed in {execution_time_minutes:.2f} minutes.")
 
+#Displays a spinner in the terminal window to show when something is processing
+class Spinner:
+    busy = False
+    delay = 0.1
+
+    @staticmethod
+    def spinning_cursor():
+        while 1: 
+            for cursor in '|/-\\': yield cursor
+
+    def __init__(self, delay=None):
+        self.spinner_generator = self.spinning_cursor()
+        if delay and float(delay): self.delay = delay
+
+    def spinner_task(self):
+        while self.busy:
+            sys.stdout.write(next(self.spinner_generator))
+            sys.stdout.flush()
+            time.sleep(self.delay)
+            sys.stdout.write('\b')
+            sys.stdout.flush()
+
+    def __enter__(self):
+        self.busy = True
+        threading.Thread(target=self.spinner_task).start()
+
+    def __exit__(self, exception, value, tb):
+        self.busy = False
+        time.sleep(self.delay)
+        if exception is not None:
+            return False
+
+#Format Line Width for terminal outputs
+def format_line_width(input_text, desired_width):
+    lines = []
+    residual = ""
+    #Adds residual (if present) from the previous line to current line
+    for i in range (0, len(input_text), desired_width):
+        temp_line = f"{input_text[i-len(residual):i+desired_width]}"
+        #If the last character is a space, add it to be printed
+        if temp_line[-1] == "":
+            residual = ""
+            lines.append(temp_line)
+        #Adjust residual to be the length of the partial word from previous line
+        else:
+            last_space_index = temp_line.rindex(' ')
+            reduced_line = temp_line[:last_space_index]
+            residual = temp_line[last_space_index + 1:]
+            lines.append(reduced_line)
+
+    # lines = [input_text[i:i+desired_width] + '\n' for i in range(0, len(input_text), desired_width)]
+    return '\n'.join(lines)
+
 #Basic query using Alpaca instruction format (use with finetuned Alpaca model)
 def query_alpaca(instruction, input, new_tokens, context_size, temperature, top_k):
     formatted_text = format_input_alpaca(instruction, input)
     query = text_to_token_ids(formatted_text, tokenizer)
-    token_ids = generate(model, query, new_tokens, context_size=context_size, temperature=temperature, top_k=top_k)
+
+    with Spinner():
+        token_ids = generate(model, query, new_tokens, context_size=context_size, temperature=temperature, top_k=top_k)
+    
     result = token_ids_to_text(token_ids, tokenizer)
     response_text = (
         result[len(formatted_text):]
@@ -844,22 +903,28 @@ def query_alpaca(instruction, input, new_tokens, context_size, temperature, top_
         .strip()
     )
     response_text = response_text.split("<|endoftext|>", 1)[0] #Trims everything after the first <|endoftext|>
+    response_text = format_line_width(response_text, 72) 
+    print("", end="\r")
     print(response_text)
 
+#Prompts the user to input instructions/input for an Alpaca based model
 def prompt_alpaca():
     formatted_model_name = checkpoint_load.replace(".pth", "")
-    print(f"-----------------PROMPT FOR: {formatted_model_name}----------------------\n"
-        "      Prompts for this gpt model are handled in the Alpaca format.        \n"
-        "--------------------------------------------------------------------------\n"
-        "Enter an instruction (examples):                                          \n"
-        "'Generate a headline for the following article.' or 'What is an API?'     \n"
-        "Enter an optional input (example):                                        \n"
-        "'This article discusses the future of renewable energy sources in the US.'\n"
-        "--------------------------------------------------------------------------\n")
+    print(f"--------------------PROMPT FOR: {formatted_model_name}------------------------\n"
+        "      Prompts for this gpt model are handled in the Alpaca format.             \n"
+        "-------------------------------------------------------------------------------\n"
+        "Enter an instruction (examples):                                               \n"
+        "'Generate a headline for the following article.' or 'What is an API?'          \n"
+        "Enter an optional input (example):                                             \n"
+        "'This article discusses the future of renewable energy sources in the US.'     \n"
+        "-------------------------------------------------------------------------------\n")
     user_instruction = input("Please enter an instruction/prompt: ")
     user_input = input("Please enter an input (optional): ")
+
+    #Query Call
     query_alpaca(user_instruction, user_input, 100, 1024, 1.4, 10)
-    print("--------------------------Query again? Y or N-----------------------------\n")
+
+    print("----------------------------Query again? Y or N-------------------------------")
     repeat_question_answer = input("'Y' for 'Yes', 'N' for 'No'")
 
     true_responses = ["y", "Y", "yes", "YES", "Yes"]
@@ -867,10 +932,10 @@ def prompt_alpaca():
         return True
     else:
         return False
-        
 
 #-----------Run------------
-model, optimizer = load_checkpoint(checkpoint_load)
+with Spinner():
+    model, optimizer = load_checkpoint(checkpoint_load)
 
 # RUN ALPACA TRAINING
 # train_on_alpaca()
