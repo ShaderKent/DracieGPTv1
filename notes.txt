@@ -1,0 +1,144 @@
+
+#------------------------Loads Short-story for testing-----------------------------
+# file_path = "the-verdict.txt"
+# url = "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch/main/ch02/01_main-chapter-code/the-verdict.txt"
+
+# if not os.path.exists(file_path):
+#     with urllib.request.urlopen(url) as response:
+#         text_data = response.read().decode("utf-8")
+#     with open(file_path, "w", encoding="utf-8") as file:
+#         file.write(text_data)
+
+# else:
+#     with open(file_path, "r", encoding="utf-8") as file:
+#         text_data = file.read()
+
+# total_characters = len(text_data)
+# total_tokens = len(tokenizer.encode(text_data))
+
+# print(f"Characters: {len(text_data)}, Tokens: {len(tokenizer.encode(text_data))}")
+# #---------------------------------------------------------------------
+# OPTION FOR RUNNING PRETRAINING
+# #Untrained files
+# untrained = [
+#     # 'Pile-1-2501.txt', 
+#     'Pile-2501-5001.txt', 
+#     'Pile-5001-7501.txt', 
+#     # 'Pile-7501-10001.txt', 
+#     # "Pile-10001-12501.txt",
+#     # 'Pile-12501-15001.txt', 
+#     # 'Pile-15001-17501.txt', 
+#     # 'Pile-17501-20001.txt', 
+#     # 'Pile-20001-25001.txt', 
+#     ]
+# #Loads files for training
+# raw_text = ""
+# for i in range(0, len(untrained)):
+#     currentTrain = untrained.pop()
+#     with open(currentTrain,  encoding='utf-8') as f:
+#         for line in f.readlines(): #Current file is a list, spreads it into a long string
+#             raw_text = raw_text + line
+#     # with open('Pile-2501-5001.txt',  encoding='utf-8') as f:
+#     #     raw_text = ""
+#     #     for line in f.readlines(): #Current file is a list, spreads it into a long string
+#     #         raw_text = raw_text + line
+
+# #Confirms file is loaded by printing text
+# # print(len(raw_text.split()))
+# print(raw_text[:150])
+
+#-----------------------------
+# #TRAINING VARIABLES:
+# #Train/Validation Ratio
+# train_ratio = 0.90
+# #Splits the text_data relative to training ratio => example: train_Data = 90%, val_data = 10%
+# split_idx = int(train_ratio * len(raw_text))
+# train_data = raw_text[:split_idx] 
+# val_data = raw_text[split_idx:]
+
+# train_loader = create_dataloader_v1(
+#     train_data,
+#     # raw_text,
+#     batch_size = 2, #Set very low, 2, due to demands processing large batches. GPT-2 = 1024
+#     max_length = GPT_CONFIG_124M["context_length"],
+#     stride = GPT_CONFIG_124M["context_length"],
+#     drop_last = True,
+#     shuffle = True,
+#     num_workers = 0
+# )
+
+# val_loader = create_dataloader_v1(
+#     val_data,
+#     # raw_text,
+#     batch_size = 2,  #Set very low, 2, due to demands processing large batches. GPT-2 = 1024
+#     max_length = GPT_CONFIG_124M["context_length"],
+#     stride = GPT_CONFIG_124M["context_length"],
+#     drop_last = False,
+#     shuffle = False,
+#     num_workers = 0
+# )  
+
+
+#Handles importing text data from Pile Dataset
+#----------------------------------------------------
+# num_samples_to_take = 5
+# from datasets import load_dataset
+# dataset = load_dataset("monology/pile-uncopyrighted", split="train", streaming=True, trust_remote_code=True)
+# # dataset = dataset.take(num_samples_to_take)
+# print(dataset)
+# indexPileCC = 1
+# tempString = ""
+# for item in dataset: 
+#     if (item["meta"]['pile_set_name'] == "Pile-CC"):
+#         indexPileCC = indexPileCC + 1
+#         tempString = tempString + item["text"]
+#         print("Current Index (only Pile-CC): ", indexPileCC)
+
+
+#     if(indexPileCC % 2500 == 1):
+#         with open(f"Pile-{indexPileCC-2500}-{indexPileCC}.txt", "w", encoding="utf-8") as f:
+#             f.write(tempString)
+#         tempString = ""
+#         indexPileCC = indexPileCC + 1
+#------------
+
+
+#-----------------------------Training Test------------------------------------------
+# #NOTE: Uncomment the following code to calculate execution time
+# start_time = time.time()
+
+# torch.cuda.empty_cache() #Added due to maxing out cache in GPU
+# torch.manual_seed(123) #Reproducibility
+
+# num_epochs = 1 # Go through entire dataset 10 times
+# train_losses, val_losses, tokens_seen = train_model_simple(
+#     model, train_loader, val_loader, optimizer, device,
+#     num_epochs=num_epochs, eval_freq=5, eval_iter=5,
+#     start_context="Every effort moves you", tokenizer=tokenizer
+# )
+
+# #NOTE: Uncomment the following code to calculate execution time
+# end_time = time.time()
+# execution_time_minutes = (end_time - start_time) / 60
+# print(f"Training completed in {execution_time_minutes:.2f} minutes.")                   
+
+
+#Need to grab the specific params from the downloaded params and load them into the model
+
+# file_path = "instruction-data.json"
+# file_path = "alpaca_0-1000.json"
+
+# url = (
+#     "https://raw.githubusercontent.com/rasbt/LLMs-from-scratch"
+#     "/main/ch07/01_main-chapter-code/instruction-data.json"
+# )
+
+# url = (
+#      "https://datasets-server.huggingface.co/rows?dataset=yahma%2Falpaca-cleaned&config=default&split=train&offset=0&length=1000"
+# )
+
+# # for i in range(0, 259):
+# temp_data = download_and_load_file(file_path, "https://huggingface.co/datasets/yahma/alpaca-cleaned/resolve/main/alpaca_data_cleaned.json")
+# print("Dataset Downloaded/Confirmed")
+
+
