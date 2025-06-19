@@ -2,7 +2,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from server.main import query_alpaca
+from main import query_alpaca
 
 # Create your views here.
 @api_view(['GET'])

@@ -748,10 +748,10 @@ customized_collate_fn = partial(custom_collate_fn, device=device, allowed_max_le
 #Generates dataloaders using Alpaca instruction data for finetuning an instruction based model
 def generate_alpaca_dataloaders():
     import alpaca_full as alpaca_full
-    data = alpaca_full.alpaca_data[:1000]
+    # data = alpaca_full.alpaca_data[:1000]
     # data = alpaca_full.alpaca_data[1001:2000]
     # data = alpaca_full.alpaca_data[2001:3000]
-    # data = alpaca_full.alpaca_data[3001:4000]
+    data = alpaca_full.alpaca_data[:4000] #2 Current completed 124M
     # data = alpaca_full.alpaca_data[4001:5000]
     # data = alpaca_full.alpaca_data[5001:6000]
     # data = alpaca_full.alpaca_data[6001:7000]  

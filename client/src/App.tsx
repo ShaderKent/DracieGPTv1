@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
+import SoundCircle from "./components/SoundCircle";
+
 function App() {
   const [query, setQuery] = useState<string>("What is an API?");
   const [response, setResponse] = useState<string>("");
@@ -8,10 +10,10 @@ function App() {
     useState<boolean>(false);
 
   useEffect(() => {
-    testMethod();
+    queryDracieGPT();
   }, []);
 
-  const testMethod = async () => {
+  const queryDracieGPT = async () => {
     try {
       setAPIRequestCompleted(false);
       const response = await fetch(
@@ -27,7 +29,12 @@ function App() {
     }
   };
 
-  return <>{APIRequestCompleted ? <p>{response}</p> : null}</>;
+  return (
+    <>
+      <SoundCircle />
+      {APIRequestCompleted ? <p>{response}</p> : null}
+    </>
+  );
 }
 
 export default App;
